@@ -105,6 +105,7 @@ interface InstallDetails {
   localizedName: string
   esbAllowlist: boolean
   iconUrl: string
+  webStoreStateId?: string
 }
 
 async function beginInstall(
@@ -190,7 +191,14 @@ async function beginInstall(
   }
 }
 
-export function registerWebStoreApi(webStoreState: WebStoreState) {
+let alreadyRegistered = false
+const webStoreStates: Record<string, WebStoreState> = {}
+
+export function registerWebStoreApi(webStoreState: WebStoreState, sessionId?: string) {
+  if (sessionId) webStoreStates[sessionId] = webStoreState
+  if (alreadyRegistered) return
+  alreadyRegistered = true
+
   /** Handle IPCs from the Chrome Web Store. */
   const handle = (
     channel: string,
@@ -216,11 +224,14 @@ export function registerWebStoreApi(webStoreState: WebStoreState) {
 
     d('beginInstall', details)
 
-    const result = await beginInstall(event, webStoreState, details)
+    const currentWebStoreState = details.webStoreStateId
+      ? webStoreStates[details.webStoreStateId]
+      : webStoreState
+    const result = await beginInstall(event, currentWebStoreState, details)
 
     if (result.result === Result.SUCCESS) {
       queueMicrotask(() => {
-        const ext = webStoreState.session.getExtension(details.id)
+        const ext = currentWebStoreState.session.getExtension(details.id)
         if (ext && senderFrame && !senderFrame.isDestroyed()) {
           try {
             senderFrame.send('chrome.management.onInstalled', getExtensionInfo(ext))
@@ -250,7 +261,11 @@ export function registerWebStoreApi(webStoreState: WebStoreState) {
   })
   handle('chromeWebstore.getExtensionStatus', async (_event, id, manifestJson) => {
     const manifest = JSON.parse(manifestJson)
-    return getExtensionInstallStatus(webStoreState, id, manifest)
+    const currentWebStoreState = manifest.webStoreStateId
+      ? webStoreStates[manifest.webStoreStateId]
+      : webStoreState
+    delete manifest.webStoreStateId
+    return getExtensionInstallStatus(currentWebStoreState, id, manifest)
   })
 
   handle('chromeWebstore.getFullChromeVersion', async () => {
@@ -314,8 +329,10 @@ export function registerWebStoreApi(webStoreState: WebStoreState) {
     return {}
   })
 
-  handle('chrome.management.getAll', async (event) => {
-    const extensions = webStoreState.session.getAllExtensions()
+  handle('chrome.management.getAll', async (event, webStoreStateId) => {
+    console.log('chrome.management.getAll', webStoreStateId)
+    const currentWebStoreState = webStoreStateId ? webStoreStates[webStoreStateId] : webStoreState
+    const extensions = currentWebStoreState.session.getAllExtensions()
     return extensions.map(getExtensionInfo)
   })
 
@@ -326,13 +343,17 @@ export function registerWebStoreApi(webStoreState: WebStoreState) {
 
   handle(
     'chrome.management.uninstall',
-    async (event, id, options: { showConfirmDialog: boolean }) => {
+    async (event, id, options: { showConfirmDialog: boolean; webStoreStateId?: string }) => {
       if (options?.showConfirmDialog) {
         // TODO: confirmation dialog
       }
 
+      const currentWebStoreState = options.webStoreStateId
+        ? webStoreStates[options.webStoreStateId]
+        : webStoreState
+
       try {
-        await uninstallExtension(webStoreState, id)
+        await uninstallExtension(currentWebStoreState, id)
         queueMicrotask(() => {
           event.sender.send('chrome.management.onUninstalled', id)
         })

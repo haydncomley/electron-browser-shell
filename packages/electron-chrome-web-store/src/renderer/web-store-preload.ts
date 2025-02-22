@@ -108,6 +108,7 @@ function setupChromeWebStoreApi() {
 
     beginInstallWithManifest3: async (details, callback) => {
       console.log('webstorePrivate.beginInstallWithManifest3', details)
+      ;(details as any).webStoreStateId = await ipcRenderer.invoke('get-session-id')
       const { result, message } = await ipcRenderer.invoke('chromeWebstore.beginInstall', details)
       console.log('webstorePrivate.beginInstallWithManifest3 result:', result)
       setExtensionError(result === Result.SUCCESS ? null : message)
@@ -142,7 +143,13 @@ function setupChromeWebStoreApi() {
 
     getExtensionStatus: async (id, manifestJson, callback) => {
       console.log('webstorePrivate.getExtensionStatus', id, { id, manifestJson, callback })
-      const result = await ipcRenderer.invoke('chromeWebstore.getExtensionStatus', id, manifestJson)
+      const manifest = JSON.parse(manifestJson)
+      manifest.webStoreStateId = await ipcRenderer.invoke('get-session-id')
+      const result = await ipcRenderer.invoke(
+        'chromeWebstore.getExtensionStatus',
+        id,
+        JSON.stringify(manifest),
+      )
       console.log('webstorePrivate.getExtensionStatus result:', id, result)
       if (callback) callback(result)
       maybeUpdateBranding()
@@ -246,6 +253,7 @@ function setupChromeWebStoreApi() {
       console.log('chrome.runtime.getManifest called')
       return {}
     },
+    getSessionId: () => ipcRenderer.invoke('get-session-id'),
   }
   contextBridge.exposeInMainWorld('electronRuntime', runtime)
 
@@ -270,12 +278,14 @@ function setupChromeWebStoreApi() {
         ipcRenderer.removeListener('chrome.management.onUninstalled', callback)
       },
     },
-    getAll: (callback: (extensions: any[]) => void) => {
+    getAll: async (callback: (extensions: any[]) => void) => {
       console.log('chrome.management.getAll called')
-      ipcRenderer.invoke('chrome.management.getAll').then((result) => {
-        console.log('chrome.management.getAll result:', result)
-        callback(result)
-      })
+      ipcRenderer
+        .invoke('chrome.management.getAll', await ipcRenderer.invoke('get-session-id'))
+        .then((result) => {
+          console.log('chrome.management.getAll result:', result)
+          callback(result)
+        })
     },
     setEnabled: async (id: string, enabled: boolean) => {
       console.log('chrome.management.setEnabled', { id, enabled })
@@ -283,8 +293,13 @@ function setupChromeWebStoreApi() {
       console.log('chrome.management.setEnabled result:', result)
       return result
     },
-    uninstall: (id: string, options: { showConfirmDialog: boolean }, callback?: () => void) => {
+    uninstall: async (
+      id: string,
+      options: { showConfirmDialog: boolean },
+      callback?: () => void,
+    ) => {
       console.log('chrome.management.uninstall', { id, options })
+      ;(options as any).webStoreStateId = await ipcRenderer.invoke('get-session-id')
       ipcRenderer.invoke('chrome.management.uninstall', id, options).then((result) => {
         console.log('chrome.management.uninstall result:', result)
         if (callback) callback()

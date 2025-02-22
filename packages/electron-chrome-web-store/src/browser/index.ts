@@ -70,7 +70,10 @@ interface ElectronChromeWebStoreOptions {
  *
  * @param options Chrome Web Store configuration options.
  */
-export async function installChromeWebStore(opts: ElectronChromeWebStoreOptions = {}) {
+export async function installChromeWebStore(
+  opts: ElectronChromeWebStoreOptions = {},
+  sessionId?: string,
+) {
   const session = opts.session || electronSession.defaultSession
   const extensionsPath = opts.extensionsPath || getDefaultExtensionsPath()
   const modulePath = opts.modulePath || __dirname
@@ -106,7 +109,7 @@ export async function installChromeWebStore(opts: ElectronChromeWebStoreOptions 
     session.setPreloads([...session.getPreloads(), preloadPath])
   }
 
-  registerWebStoreApi(webStoreState)
+  registerWebStoreApi(webStoreState, sessionId)
 
   await app.whenReady()
 
